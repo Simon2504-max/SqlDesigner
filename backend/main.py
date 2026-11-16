@@ -150,7 +150,7 @@ def delete_user(user_id: int = Path(..., description="ID of the user to delete")
 
 @app.post("/schemas/", response_model=schemas.SchemaRead)
 def create_schema(schema: schemas.SchemaCreate, db: Session = Depends(get_db)):
-    db_schema = Schema(**schema.dict())
+    db_schema = Schema(**schema.model_dump(by_alias=True))
     db.add(db_schema)
     db.commit()
     db.refresh(db_schema)
@@ -378,7 +378,7 @@ def update_schema(schema_id: schemas.UUID4, schema_update: schemas.SchemaCreate,
     schema = db.query(Schema).filter(Schema.id == schema_id).first()
     if not schema:
         raise HTTPException(status_code=404, detail="Schema not found")
-    for key, value in schema_update.dict().items():
+    for key, value in schema_update.model_dump(by_alias=True).items():
         setattr(schema, key, value)
     db.commit()
     db.refresh(schema)
@@ -400,7 +400,7 @@ def delete_schema(schema_id: schemas.UUID4, db: Session = Depends(get_db)):
 
 @app.post("/tables/", response_model=TablesRead)
 def create_table(table: TablesCreate, db: Session = Depends(get_db)):
-    db_table = Table(**table.dict())
+    db_table = Table(**table.model_dump(by_alias=True))
     db.add(db_table)
     db.commit()
     db.refresh(db_table)
@@ -433,7 +433,7 @@ def update_table(table_id: UUID4, table_update: TablesCreate, db: Session = Depe
     table = db.query(Table).filter(Table.id == table_id).first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
-    for key, value in table_update.dict().items():
+    for key, value in table_update.model_dump(by_alias=True).items():
         setattr(table, key, value)
     db.commit()
     db.refresh(table)
@@ -454,7 +454,7 @@ def delete_table(table_id: UUID4, db: Session = Depends(get_db)):
 
 @app.post("/fields/", response_model=FieldRead)
 def create_field(field: FieldCreate, db: Session = Depends(get_db)):
-    db_field = Field(**field.dict())
+    db_field = Field(**field.model_dump(by_alias=True))
     db.add(db_field)
     db.commit()
     db.refresh(db_field)
@@ -500,7 +500,7 @@ def update_field(field_id: UUID4, field_update: FieldCreate, db: Session = Depen
     field = db.query(Field).filter(Field.id == field_id).first()
     if not field:
         raise HTTPException(status_code=404, detail="Field not found")
-    for key, value in field_update.dict().items():
+    for key, value in field_update.model_dump(by_alias=True).items():
         setattr(field, key, value)
     db.commit()
     db.refresh(field)
@@ -522,7 +522,7 @@ def delete_field(field_id: UUID4, db: Session = Depends(get_db)):
 
 @app.post("/relations/", response_model=RelationRead)
 def create_relation(relation: RelationCreate, db: Session = Depends(get_db)):
-    db_relation = Relation(**relation.dict())
+    db_relation = Relation(**relation.model_dump(by_alias=True))
     db.add(db_relation)
     db.commit()
     db.refresh(db_relation)
@@ -563,7 +563,7 @@ def update_relation(relation_id: UUID4, relation_update: RelationCreate, db: Ses
     relation = db.query(Relation).filter(Relation.id == relation_id).first()
     if not relation:
         raise HTTPException(status_code=404, detail="Relation not found")
-    for key, value in relation_update.dict().items():
+    for key, value in relation_update.model_dump(by_alias=True).items():
         setattr(relation, key, value)
     db.commit()
     db.refresh(relation)

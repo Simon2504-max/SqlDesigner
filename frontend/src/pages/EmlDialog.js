@@ -1,301 +1,230 @@
-import React, { useCallback, useEffect } from "react";
+/**
+ * EmlDialog.js — Diagramme interactif des tables d'un schéma (EML).
+ *
+ * Fonctionnement :
+ *  1. À chaque ouverture, on recharge les tables, champs et relations du schéma
+ *     depuis le serveur (les données sont donc toujours à jour).
+ *  2. On transforme ces données en "nœuds" (les tables) et "arêtes" (les relations)
+ *     pour React Flow, la bibliothèque qui dessine le diagramme.
+ *  3. Dagre calcule automatiquement la position de chaque table pour éviter
+ *     qu'elles se chevauchent.
+ */
+import React, { useCallback, useEffect, useState } from "react";
+import axios from "axios";
 import ReactFlow, {
-  Controls,
-  MiniMap,
   Background,
-  useNodesState,
-  useEdgesState,
+  Controls,
   Handle,
+  MarkerType,
+  MiniMap,
   Position,
-  MarkerType
+  useEdgesState,
+  useNodesState,
 } from "reactflow";
 import dagre from "dagre";
 import "reactflow/dist/style.css";
 
+// Dimensions utilisées pour calculer la mise en page (en pixels)
+const NODE_WIDTH = 260;
+const HEADER_HEIGHT = 40;
+const ROW_HEIGHT = 28;
+const BODY_PADDING = 12;
 
+const RELATION_LABELS = { OO: "1 : 1", OM: "1 : N", MM: "N : N" };
 
+/** Hauteur réelle d'une table selon son nombre de champs. */
+function nodeHeight(fieldCount) {
+  return HEADER_HEIGHT + BODY_PADDING + Math.max(fieldCount, 1) * ROW_HEIGHT;
+}
 
-const dagreGraph = new dagre.graphlib.Graph();
-dagreGraph.setDefaultEdgeLabel(() => ({}));
-
-// Increased node size for layout calculations to assume wider/taller tables
-const NODE_WIDTH = 250;
-const NODE_HEIGHT = 300;
-
-const getLayoutedElements = (nodes, edges, direction = "LR") => {
-  dagreGraph.setGraph({
-    rankdir: direction,
-    nodesep: 100, // Increased horizontal separation
-    ranksep: 200  // Increased vertical separation (or rank separation)
-  });
+/** Calcule la position de chaque table avec Dagre (graphe neuf à chaque fois). */
+function layout(nodes, edges) {
+  const graph = new dagre.graphlib.Graph();
+  graph.setDefaultEdgeLabel(() => ({}));
+  graph.setGraph({ rankdir: "LR", nodesep: 60, ranksep: 140, marginx: 20, marginy: 20 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+    graph.setNode(node.id, { width: NODE_WIDTH, height: nodeHeight(node.data.fields.length) });
   });
+  edges.forEach((edge) => graph.setEdge(edge.source, edge.target));
 
-  edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
+  dagre.layout(graph);
+
+  return nodes.map((node) => {
+    const { x, y } = graph.node(node.id);
+    const height = nodeHeight(node.data.fields.length);
+    // Dagre donne le centre de la table ; React Flow attend le coin en haut à gauche.
+    return { ...node, position: { x: x - NODE_WIDTH / 2, y: y - height / 2 } };
   });
+}
 
-  dagre.layout(dagreGraph);
-
-  const layoutedNodes = nodes.map((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    node.targetPosition = direction === "LR" ? "left" : "top";
-    node.sourcePosition = direction === "LR" ? "right" : "bottom";
-
-    // We are shifting the dagre node position (anchor=center center) to the top left
-    // so it matches the React Flow node anchor point (top left).
-    node.position = {
-      x: nodeWithPosition.x - NODE_WIDTH / 2,
-      y: nodeWithPosition.y - NODE_HEIGHT / 2,
-    };
-
-    return node;
-  });
-
-  return { nodes: layoutedNodes, edges };
-};
-
-const TableNode = ({ data }) => {
+/** Petit badge (PK, NN, UQ) affiché à droite d'un champ. */
+function Badge({ children, title }) {
   return (
-    <div className="table-node-container">
-      <div className="table-header">
-        <strong>{data.name}</strong>
-      </div>
+    <span className="eml-badge" title={title}>
+      {children}
+    </span>
+  );
+}
 
-      <div className="table-body">
-        <ul className="field-list">
-          {(data.fields || []).map((f) => (
-            <li key={f.id} className="field-item" style={{ position: 'relative' }}>
-              {/* Target Handle (Left) */}
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={`target-${f.id}`}
-                className="handle-target-field"
-                style={{ top: '50%', transform: 'translateY(-50%)', left: -8 }}
-              />
+/** Dessin d'une table : un en-tête et une ligne par champ. */
+function TableNode({ data }) {
+  return (
+    <div className="eml-table" style={{ width: NODE_WIDTH }}>
+      <div className="eml-table-header">{data.name}</div>
+      <div className="eml-table-body">
+        {data.fields.length === 0 && <div className="eml-empty">aucun champ</div>}
+        {data.fields.map((field) => (
+          <div key={field.id} className="eml-row">
+            {/* Point d'arrivée d'une flèche (à gauche du champ) */}
+            <Handle type="target" position={Position.Left} id={`${field.id}-t`} className="eml-handle" />
 
-              <span className="field-name">{f.name}</span>
-              <span className="field-type">{f.type}</span>
+            <span className="eml-field-name">
+              {field.is_primary_key && "🔑 "}
+              {field.name}
+            </span>
+            <span className="eml-field-type">
+              {field.type}
+              {field.length ? `(${field.length})` : ""}
+              {field.is_primary_key && <Badge title="Clé primaire">PK</Badge>}
+              {!field.is_primary_key && !field.is_nullable && <Badge title="NOT NULL">NN</Badge>}
+              {field.is_unique && <Badge title="UNIQUE">UQ</Badge>}
+            </span>
 
-              {/* Source Handle (Right) */}
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`source-${f.id}`}
-                className="handle-source-field"
-                style={{ top: '50%', transform: 'translateY(-50%)', right: -8 }}
-              />
-            </li>
-          ))}
-        </ul>
+            {/* Point de départ d'une flèche (à droite du champ) */}
+            <Handle type="source" position={Position.Right} id={`${field.id}-s`} className="eml-handle" />
+          </div>
+        ))}
       </div>
     </div>
   );
-};
+}
 
-const nodeTypes = {
-  tableNode: TableNode,
-};
+// Défini en dehors du composant pour que React Flow ne le recrée pas à chaque rendu
+const nodeTypes = { table: TableNode };
 
-export default function EmlDialog({ open, onClose, schema }) {
+/** Récupère une liste ; un 404 du serveur signifie simplement "liste vide". */
+async function getList(url) {
+  try {
+    const res = await axios.get(url);
+    return res.data || [];
+  } catch (err) {
+    if (err?.response?.status === 404) return [];
+    throw err;
+  }
+}
+
+export default function EmlDialog({ open, onClose, schemaId, schemaName, apiBase }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [version, setVersion] = useState(0); // force React Flow à recadrer après chaque chargement
 
-  const onLayout = useCallback(
-    (direction) => {
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        nodes,
-        edges,
-        direction
+  const load = useCallback(async () => {
+    if (!schemaId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [tables, fields, relations] = await Promise.all([
+        getList(`${apiBase}/tables/schema/${schemaId}`),
+        getList(`${apiBase}/fields/schema/${schemaId}`),
+        getList(`${apiBase}/relations/`),
+      ]);
+
+      // Champs regroupés par table, et table de chaque champ
+      const fieldsByTable = {};
+      const tableOfField = {};
+      fields.forEach((f) => {
+        if (!fieldsByTable[f.table]) fieldsByTable[f.table] = [];
+        fieldsByTable[f.table].push(f);
+        tableOfField[f.id] = f.table;
+      });
+      Object.values(fieldsByTable).forEach((list) =>
+        list.sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name))
       );
 
-      setNodes([...layoutedNodes]);
-      setEdges([...layoutedEdges]);
-    },
-    [nodes, edges, setNodes, setEdges]
-  );
-
-  useEffect(() => {
-    if (open && schema && schema.tables) {
-      // 1. Build Nodes
-      const initialNodes = schema.tables.map((table) => ({
-        id: table.id.toString(),
-        type: "tableNode",
-        data: {
-          name: table.name,
-          fields: table.fields
-        },
+      // 1. Les nœuds : une table = un nœud
+      const newNodes = tables.map((t) => ({
+        id: String(t.id),
+        type: "table",
         position: { x: 0, y: 0 },
+        data: { name: t.name, fields: fieldsByTable[t.id] || [] },
       }));
 
-      // 2. Build Edges
-      const initialEdges = [];
-      const fieldToTable = {};
-      schema.tables.forEach((t) => {
-        t.fields.forEach((f) => {
-          fieldToTable[f.id] = t.id.toString();
-        });
-      });
+      // 2. Les arêtes : seulement les relations dont les deux champs sont dans ce schéma
+      const newEdges = relations
+        .filter((r) => tableOfField[r.value_from] && tableOfField[r.value_to])
+        .map((r) => ({
+          id: String(r.id),
+          source: String(tableOfField[r.value_from]),
+          sourceHandle: `${r.value_from}-s`,
+          target: String(tableOfField[r.value_to]),
+          targetHandle: `${r.value_to}-t`,
+          type: "smoothstep",
+          label: RELATION_LABELS[r.type] || r.type,
+          markerEnd: { type: MarkerType.ArrowClosed, color: "#60a5fa" },
+          style: { stroke: "#60a5fa", strokeWidth: 2 },
+          labelStyle: { fill: "#e2e8f0", fontWeight: 700, fontSize: 12 },
+          labelBgStyle: { fill: "#0f172a" },
+          labelBgPadding: [6, 3],
+          labelBgBorderRadius: 4,
+        }));
 
-      const seen = new Set();
-      schema.tables.forEach((table) => {
-        table.fields.forEach((field) => {
-          if (field.relations_to) {
-            field.relations_to.forEach((rel) => {
-              const fromTable = fieldToTable[rel.value_from];
-              const toTable = fieldToTable[rel.value_to];
-
-              if (!fromTable || !toTable) return;
-              if (fromTable === toTable) return;
-
-              const key = `${rel.value_from}-${rel.value_to}-${rel.type}`;
-              if (seen.has(key)) return;
-              seen.add(key);
-
-              initialEdges.push({
-                id: `e${rel.id}`,
-                source: fromTable,
-                target: toTable,
-                sourceHandle: `source-${rel.value_from}`, // Connect from specific field
-                targetHandle: `target-${rel.value_to}`,   // Connect to specific field
-                label: rel.type,
-                type: 'smoothstep', // Orthogonal lines often look better for field-to-field
-                animated: true,
-                markerEnd: { type: MarkerType.ArrowClosed },
-                style: { stroke: '#64748b', strokeWidth: 2 },
-                labelStyle: { fill: '#94a3b8', fontWeight: 700 }
-              });
-            });
-          }
-        });
-      });
-
-      // 3. Apply Layout
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        initialNodes,
-        initialEdges,
-        "LR"
-      );
-
-      setNodes(layoutedNodes);
-      setEdges(layoutedEdges);
+      // 3. La mise en page
+      setNodes(layout(newNodes, newEdges));
+      setEdges(newEdges);
+      setVersion((v) => v + 1);
+    } catch (err) {
+      console.error(err);
+      setError("Impossible de charger le diagramme. Le serveur est-il lancé ?");
+    } finally {
+      setLoading(false);
     }
-  }, [open, schema, setNodes, setEdges]); // Only re-run if open state or schema changes
+  }, [schemaId, apiBase, setNodes, setEdges]);
+
+  // Recharge à chaque ouverture
+  useEffect(() => {
+    if (open) load();
+  }, [open, load]);
 
   if (!open) return null;
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={dialogStyle} onClick={(e) => e.stopPropagation()}>
-        <div className="schema-dialog-header">
-          <h2>{schema.name || "EML Diagram"}</h2>
-          <button onClick={onClose} className="close-btn">Close</button>
+    <div className="eml-overlay" onClick={onClose}>
+      <div className="eml-dialog" onClick={(e) => e.stopPropagation()}>
+        <style>{EML_CSS}</style>
+
+        <div className="eml-header">
+          <h2>{schemaName || "Diagramme"}</h2>
+          <div className="eml-actions">
+            <button onClick={load} disabled={loading}>
+              {loading ? "Chargement…" : "Actualiser"}
+            </button>
+            <button onClick={onClose}>Fermer</button>
+          </div>
         </div>
 
-        <div className="schema-dialog-content">
-          <style>{`
-            .table-node-container {
-                background: #1e293b;
-                border: 1px solid #334155;
-                border-radius: 8px;
-                min-width: 200px;
-                font-family: 'Inter', sans-serif;
-                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                overflow: hidden;
-            }
-            .table-header {
-                background: #0f172a;
-                padding: 10px 15px;
-                border-bottom: 1px solid #334155;
-                color: #e2e8f0;
-                font-size: 14px;
-                text-align: center;
-                font-weight: 600;
-            }
-            .table-body {
-                padding: 10px;
-            }
-            .field-list {
-                list-style: none;
-                padding: 0;
-                margin: 0;
-            }
-            .field-item {
-                display: flex;
-                justify-content: space-between;
-                padding: 4px 0;
-                border-bottom: 1px solid #334155;
-                color: #cbd5e1;
-                font-size: 12px;
-            }
-            .field-item:last-child {
-                border-bottom: none;
-            }
-            .field-name {
-                font-weight: 500;
-            }
-            .field-type {
-                color: #94a3b8;
-                font-size: 11px;
-                text-transform: uppercase;
-            }
-            .handle-target, .handle-source {
-                width: 8px;
-                height: 8px;
-                background: #64748b;
-                border: 2px solid #1e293b;
-            }
-            
-            .schema-dialog-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding-bottom: 15px;
-                border-bottom: 1px solid #334155;
-                margin-bottom: 15px;
-            }
-            .schema-dialog-header h2 {
-                margin: 0;
-                color: #fff;
-                font-size: 1.25rem;
-            }
-            .close-btn {
-                background: transparent;
-                border: 1px solid #475569;
-                color: #cbd5e1;
-                padding: 6px 12px;
-                border-radius: 6px;
-                cursor: pointer;
-                transition: all 0.2s;
-            }
-            .close-btn:hover {
-                background: #334155;
-                color: white;
-            }
-            .schema-dialog-content {
-                flex: 1;
-                background: #020617;
-                border-radius: 8px;
-                overflow: hidden;
-                position: relative;
-            }
-            `}</style>
-
+        <div className="eml-canvas">
+          {error && <div className="eml-message eml-error">{error}</div>}
+          {!error && !loading && nodes.length === 0 && (
+            <div className="eml-message">Ce schéma ne contient encore aucune table.</div>
+          )}
           <ReactFlow
+            key={version}
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             fitView
-            style={{ background: "#020617" }}
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.1}
+            proOptions={{ hideAttribution: true }}
           >
             <Background color="#1e293b" gap={16} />
-            <Controls style={{ fill: '#cbd5e1' }} />
-            <MiniMap style={{ background: '#0f172a' }} nodeColor="#334155" />
+            <Controls />
+            <MiniMap pannable zoomable nodeColor="#334155" maskColor="rgba(2,6,23,0.7)" />
           </ReactFlow>
         </div>
       </div>
@@ -303,25 +232,40 @@ export default function EmlDialog({ open, onClose, schema }) {
   );
 }
 
-const overlayStyle = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0, 0, 0, 0.75)",
-  backdropFilter: "blur(4px)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-};
+// Styles du diagramme. Tous les noms commencent par "eml-" pour ne pas
+// entrer en conflit avec les styles du reste de l'application (App.css).
+const EML_CSS = `
+.eml-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: flex;
+  align-items: center; justify-content: center; z-index: 1000; }
+.eml-dialog { background: #0f172a; width: 92%; height: 90%; border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; border: 1px solid #1e293b; }
+.eml-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.eml-header h2 { margin: 0; color: #fff; font-size: 1.2rem; }
+.eml-actions { display: flex; gap: 8px; }
+.eml-actions button { background: transparent; border: 1px solid #475569; color: #cbd5e1;
+  padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+.eml-actions button:hover { background: #334155; color: #fff; }
+.eml-canvas { flex: 1; position: relative; background: #020617; border-radius: 8px; overflow: hidden; }
+.eml-message { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 5;
+  color: #94a3b8; background: #0f172a; padding: 8px 14px; border-radius: 6px; }
+.eml-error { color: #fca5a5; }
 
-const dialogStyle = {
-  background: "#0f172a",
-  padding: "20px",
-  borderRadius: "12px",
-  width: "90%",
-  height: "90%",
-  display: "flex",
-  flexDirection: "column",
-  boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-  border: "1px solid #1e293b",
-};
+.eml-table { background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+  font-family: system-ui, sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+.eml-table-header { height: ${HEADER_HEIGHT}px; line-height: ${HEADER_HEIGHT}px; text-align: center;
+  background: #0b1220; color: #f1f5f9; font-weight: 700; font-size: 14px;
+  border-bottom: 1px solid #334155; border-radius: 8px 8px 0 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 10px; }
+.eml-table-body { padding: ${BODY_PADDING / 2}px 0; }
+.eml-row { position: relative; height: ${ROW_HEIGHT}px; display: flex; align-items: center;
+  justify-content: space-between; gap: 8px; padding: 0 14px; font-size: 12px; color: #cbd5e1; }
+.eml-row + .eml-row { border-top: 1px solid #263244; }
+.eml-field-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eml-field-type { color: #94a3b8; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.eml-badge { font-size: 9px; font-weight: 700; color: #0f172a; background: #fbbf24;
+  border-radius: 3px; padding: 1px 3px; }
+.eml-empty { height: ${ROW_HEIGHT}px; line-height: ${ROW_HEIGHT}px; text-align: center;
+  color: #64748b; font-size: 12px; font-style: italic; }
+.eml-handle { width: 8px !important; height: 8px !important; background: #60a5fa !important;
+  border: 2px solid #1e293b !important; }
+`;

@@ -168,3 +168,20 @@
   .auth-card, .profile-card { width:100% }
   .placeholder-canvas { height:220px }
 }
+/* ------------------------------------------------------------------ */
+/* Correctifs de mise en page (refonte)                                */
+/* ------------------------------------------------------------------ */
+
+/* Un schéma ouvert : l'éditeur passe sur sa propre ligne, en pleine largeur */
+.schema-item { flex-wrap: wrap; }
+.schema-item > :nth-child(3) { flex-basis: 100%; }
+
+/* Les deux colonnes de l'éditeur : Tables (gauche) et champs (droite) */
+.split-grid { grid-template-columns: minmax(240px, 1fr) minmax(340px, 1.5fr); }
+
+/* Un champ : nom + type + boutons sur une ligne, relations en dessous */
+.fields-list .field-item { flex-wrap: wrap; gap: 8px; }
+.field-relations { flex-basis: 100%; }
+
+/* Un bouton ne coupe jamais son texte en deux lignes */
+.chip { white-space: nowrap; }

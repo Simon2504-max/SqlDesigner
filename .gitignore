@@ -45,3 +45,6 @@ venv/
 .DS_Store
 
 */fly.toml
+
+# Bases SQLite locales
+*.db

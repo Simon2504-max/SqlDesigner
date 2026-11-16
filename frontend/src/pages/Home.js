@@ -309,13 +309,16 @@ function SchemaManager({ userId }) {
   };
 
   return (
-    <div>
-       <EmlDialog
+    <div>      
+      <EmlDialog
         open={emlDialogOpen}
         onClose={() => setEmlDialogOpen(false)}
-
-        schema={emlSchema}
+        schemaId={selectedSchema?.id}
+        schemaName={selectedSchema?.name}
+        apiBase={API_BASE}
       />
+
+    
       <h2>My Schemas</h2>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <input className="small-input" value={newSchemaName} placeholder="New Schema Name" onChange={(e) => setNewSchemaName(e.target.value)} />

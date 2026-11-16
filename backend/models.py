@@ -1,120 +1,165 @@
-from sqlalchemy import Column, Integer, String, DateTime, func, ForeignKey, Enum, UniqueConstraint
+"""
+models.py — Structure des tables de la base de données de l'application.
+
+Chaque classe ci-dessous correspond à une table de la base :
+  User      -> users      : les comptes utilisateurs
+  Schema    -> schemas    : les schémas (projets de base de données) d'un utilisateur
+  Table     -> tables     : les tables d'un schéma
+  Field     -> fields     : les champs (colonnes) d'une table
+  Relation  -> relations  : les liens entre deux champs
+
+Convention pour les relations (utilisée par l'export SQL et les diagrammes) :
+  value_from = le champ RÉFÉRENCÉ, côté "un"        (ex. auteur.id)
+  value_to   = le champ qui RÉFÉRENCE, côté "plusieurs" (ex. livre.auteur_id)
+  OO = un pour un, OM = un pour plusieurs, MM = plusieurs pour plusieurs
+"""
+import uuid
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from database import Base
 
-import uuid
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
-
+# Types SQL proposés pour les champs
 SQL_TYPES = (
-    "INT",
-    "INTEGER",
-    "SMALLINT",
-    "BIGINT",
-    "DECIMAL",
-    "NUMERIC",
-    "FLOAT",
-    "REAL",
-    "DOUBLE",
-    "CHAR",
-    "VARCHAR",
-    "TEXT",
-    "DATE",
-    "TIME",
-    "TIMESTAMP",
-    "DATETIME",
-    "INTERVAL",
+    "INT", "INTEGER", "SMALLINT", "BIGINT", "SERIAL",
+    "DECIMAL", "NUMERIC", "FLOAT", "REAL", "DOUBLE",
+    "CHAR", "VARCHAR", "TEXT",
+    "DATE", "TIME", "TIMESTAMP", "DATETIME", "INTERVAL",
     "BOOLEAN",
-    "BINARY",
-    "VARBINARY",
-    "BLOB",
-    "UUID",
-    "JSON",
-    "JSONB",
-    "ENUM",
-    "ARRAY"
+    "BINARY", "VARBINARY", "BLOB",
+    "UUID", "JSON", "JSONB", "ENUM", "ARRAY",
 )
 
-SQL_RELATION_TYPES = (
-    "OO",
-    "OM",
-    "MM"
-)
+# Types de relations : un-un, un-plusieurs, plusieurs-plusieurs
+SQL_RELATION_TYPES = ("OO", "OM", "MM")
 
-class User(Base):
+
+class TimestampMixin:
+    """Ajoute les dates de création et de modification à une table."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class User(TimestampMixin, Base):
     __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, nullable=False)
-    email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    full_name = Column(String)
-    phone = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True)
+    email: Mapped[str] = mapped_column(String(100), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[Optional[str]] = mapped_column(String(100))
+    phone: Mapped[Optional[str]] = mapped_column(String(20))
+
+    schemas: Mapped[list["Schema"]] = relationship(
+        back_populates="owner_user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
-class Schema(Base):
+class Schema(TimestampMixin, Base):
     __tablename__ = "schemas"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    owner = Column(Integer,ForeignKey("users.id", ondelete="CASCADE"),nullable=False)
-    name = Column(String,nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    tables = relationship("Table", back_populates="_schema")
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
 
-class Table(Base):
-    __tablename__ = "tables"         
+    owner_user: Mapped["User"] = relationship(back_populates="schemas")
+    tables: Mapped[list["Table"]] = relationship(
+        back_populates="parent_schema",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Table.name",
+    )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String,nullable=False)
-    schema = Column(UUID(as_uuid=True),ForeignKey("schemas.id", ondelete="CASCADE"),nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    _schema = relationship("Schema", back_populates="tables")
-    fields = relationship("Field", back_populates="_table")
-
+class Table(TimestampMixin, Base):
+    __tablename__ = "tables"
     __table_args__ = (
-        UniqueConstraint('schema', 'name', name='uniq table name per schema'),
+        UniqueConstraint("schema", "name", name="uq_table_name_per_schema"),
     )
 
-class Field(Base):
-    __tablename__= "fields"         
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    schema: Mapped[uuid.UUID] = mapped_column(ForeignKey("schemas.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    table = Column(UUID(as_uuid=True),ForeignKey("tables.id", ondelete="CASCADE"),nullable=False)
-    name = Column(String, nullable=False)
-    type =  Column(Enum(*SQL_TYPES, name='SQL_TYPES'), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    _table = relationship("Table", back_populates="fields")
-    relations_to = relationship("Relation", foreign_keys="Relation.value_to", back_populates="field_to")
-    relations_from = relationship("Relation", foreign_keys="Relation.value_from", back_populates="field_from")
-
-    __table_args__= (
-        UniqueConstraint('table', 'name', name='uniq field name per table'),
+    parent_schema: Mapped["Schema"] = relationship(back_populates="tables")
+    fields: Mapped[list["Field"]] = relationship(
+        back_populates="parent_table",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: [Field.position, Field.name],
     )
 
-class Relation(Base):
-    __tablename__= "relations"         
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    value_from = Column(UUID(as_uuid=True),ForeignKey("fields.id", ondelete="CASCADE"),nullable=False)
-    value_to = Column(UUID(as_uuid=True),ForeignKey("fields.id", ondelete="CASCADE"),nullable=False)
-    type =  Column(Enum(*SQL_RELATION_TYPES, name='SQL_RELATION_TYPES'), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    field_to = relationship("Field", foreign_keys=[value_to] ,back_populates='relations_to')
-    field_from = relationship("Field", foreign_keys=[value_from] , back_populates='relations_from')
-
+class Field(TimestampMixin, Base):
+    __tablename__ = "fields"
     __table_args__ = (
-        UniqueConstraint('value_from', 'value_to', name='only one relation between two fields'),
+        UniqueConstraint("table", "name", name="uq_field_name_per_table"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    table: Mapped[uuid.UUID] = mapped_column(ForeignKey("tables.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
+    type: Mapped[str] = mapped_column(Enum(*SQL_TYPES, name="sql_types"))
+
+    # Nouvelles propriétés d'un champ
+    length: Mapped[Optional[int]] = mapped_column(Integer)          # ex. VARCHAR(100)
+    is_primary_key: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_nullable: Mapped[bool] = mapped_column(Boolean, default=True)  # False = NOT NULL
+    is_unique: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_value: Mapped[Optional[str]] = mapped_column(String(255))
+    position: Mapped[int] = mapped_column(Integer, default=0)       # ordre d'affichage
+
+    parent_table: Mapped["Table"] = relationship(back_populates="fields")
+    relations_from: Mapped[list["Relation"]] = relationship(
+        foreign_keys="Relation.value_from",
+        back_populates="field_from",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    relations_to: Mapped[list["Relation"]] = relationship(
+        foreign_keys="Relation.value_to",
+        back_populates="field_to",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
+class Relation(TimestampMixin, Base):
+    __tablename__ = "relations"
+    __table_args__ = (
+        UniqueConstraint("value_from", "value_to", name="uq_one_relation_per_pair"),
+        CheckConstraint("value_from <> value_to", name="ck_no_self_relation"),
+    )
 
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    value_from: Mapped[uuid.UUID] = mapped_column(ForeignKey("fields.id", ondelete="CASCADE"))
+    value_to: Mapped[uuid.UUID] = mapped_column(ForeignKey("fields.id", ondelete="CASCADE"))
+    type: Mapped[str] = mapped_column(Enum(*SQL_RELATION_TYPES, name="sql_relation_types"))
 
+    field_from: Mapped["Field"] = relationship(
+        foreign_keys=[value_from], back_populates="relations_from"
+    )
+    field_to: Mapped["Field"] = relationship(
+        foreign_keys=[value_to], back_populates="relations_to"
+    )
