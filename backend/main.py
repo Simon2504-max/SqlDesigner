@@ -3,9 +3,7 @@ import psycopg2
 from fastapi import FastAPI, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import update
-from passlib.context import CryptContext
 from fastapi import Header
-import hashlib
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.responses import StreamingResponse
@@ -14,14 +12,13 @@ import models
 import schemas
 from schemas import *
 import database
+from security import create_access_token, get_current_user, hash_password, is_legacy_md5, verify_password
 import io
 
 from fastapi import FastAPI, HTTPException, Depends, Path
 from sqlalchemy.orm import Session, joinedload
 from models import User, Schema, Table, Field, Relation
 
-def get_md5(s: str) -> str:
-    return hashlib.md5(s.encode("utf-8")).hexdigest()
 
 models.Base.metadata.create_all(bind=database.engine)
 
@@ -43,51 +40,51 @@ def get_db():
     finally:
         db.close()
 
-# Registration
+# Inscription
 @app.post("/register", response_model=schemas.UserOut)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(
-        (models.User.username == user.username) | 
-        (models.User.email == user.email)
+    existing = db.query(models.User).filter(
+        (models.User.username == user.username) | (models.User.email == user.email)
     ).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username or email already registered")
-    
-    hashed_password = get_md5(user.password)
+    if existing:
+        raise HTTPException(status_code=400, detail="Ce nom d'utilisateur ou cet email est déjà utilisé.")
+
     new_user = models.User(
         username=user.username,
         email=user.email,
-        password_hash=hashed_password,
+        password_hash=hash_password(user.password),
         full_name=user.full_name,
-        phone=user.phone
+        phone=user.phone,
     )
-    
-    try:
-        db.add(new_user)
-    except IntegrityError as e:
-        db.rollback()
-        if isinstance(e.orig, psycopg2.errors.UniqueViolation):
-            constraint = e.orig.diag.constraint_name
-            if constraint == "users_email_key":
-                raise HTTPException(status_code=400, detail="Email already exists.")
-            elif constraint == "users_username_key":
-                raise HTTPException(status_code=400, detail="Username already exists.")
-            else:
-                raise HTTPException(status_code=400, detail="Duplicate value found.")
-        else:
-            raise HTTPException(status_code=400, detail="Database integrity error.")
-    
+    db.add(new_user)
     db.commit()
     db.refresh(new_user)
     return new_user
 
-# Login
+
+# Connexion
 @app.post("/login")
 def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if not db_user or not get_md5(user.password) == db_user.password_hash:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return {"message": "Login successful", "user": db_user}
+    if not db_user or not verify_password(user.password, db_user.password_hash):
+        raise HTTPException(status_code=401, detail="Nom d'utilisateur ou mot de passe incorrect.")
+
+    # Ancien compte haché en MD5 : on en profite pour passer à bcrypt
+    if is_legacy_md5(db_user.password_hash):
+        db_user.password_hash = hash_password(user.password)
+        db.commit()
+
+    return {
+        "access_token": create_access_token(db_user.id),
+        "token_type": "bearer",
+        "user": schemas.UserOut.model_validate(db_user),
+    }
+
+
+# Qui suis-je ? (permet de tester le jeton)
+@app.get("/me", response_model=schemas.UserOut)
+def read_me(current_user: models.User = Depends(get_current_user)):
+    return current_user
 
 
 @app.put("/update-user/{user_id}", response_model=schemas.UserOut)
