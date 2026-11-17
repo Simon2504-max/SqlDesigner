@@ -218,3 +218,13 @@ class RelationRead(ORMModel):
     value_from: UUID4
     value_to: UUID4
     type: str
+
+
+# ---------------------------------------------------------------------------
+# Export SQL
+# ---------------------------------------------------------------------------
+
+class SqlExport(BaseModel):
+    dialect: str
+    sql: str
+    warnings: list[str]

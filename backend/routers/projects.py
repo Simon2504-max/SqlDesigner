@@ -4,11 +4,11 @@ routers/projects.py — Les schémas (projets de base de données) de l'utilisat
 Le fichier s'appelle "projects" et non "schemas" pour ne pas être confondu
 avec schemas.py (les modèles Pydantic).
 """
-import io
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.orm import Session
 
 import models
@@ -16,8 +16,11 @@ import schemas
 from access import get_owned_schema
 from database import get_db
 from security import get_current_user
+from sql_export import generate_sql
 
 router = APIRouter(prefix="/schemas", tags=["Schémas"])
+
+Dialect = Literal["postgresql", "mysql", "sqlite"]
 
 
 @router.post("/", response_model=schemas.SchemaRead, status_code=201)
@@ -71,8 +74,7 @@ def delete_schema(schema_id: uuid.UUID, db: Session = Depends(get_db), user: mod
 
 
 # ---------------------------------------------------------------------------
-# Diagramme (DSD) et export SQL : ANCIENNES versions, simplement protégées.
-# Elles seront entièrement réécrites aux étapes 7 (export) et 8 (diagramme).
+# Diagramme (DSD) : ANCIENNE version, simplement protégée (réécrite à l'étape 8).
 # ---------------------------------------------------------------------------
 
 def _clean_name(name: str) -> str:
@@ -112,28 +114,35 @@ def get_dsd_diagram(schema_id: uuid.UUID, db: Session = Depends(get_db), user: m
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Export SQL (étape 7) : voir sql_export.py
+# ---------------------------------------------------------------------------
+
+@router.get("/{schema_id}/sql", response_model=schemas.SqlExport)
+def preview_sql(
+    schema_id: uuid.UUID,
+    dialect: Dialect = "postgresql",
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Le script SQL en JSON (pour l'afficher dans l'interface), avec les avertissements."""
+    result = generate_sql(get_owned_schema(db, schema_id, user), dialect)
+    return {"dialect": dialect, "sql": result.sql, "warnings": result.warnings}
+
+
 @router.get("/{schema_id}/export")
-def export_schema(schema_id: uuid.UUID, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+def export_schema(
+    schema_id: uuid.UUID,
+    dialect: Dialect = "postgresql",
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Le script SQL sous forme de fichier .sql à télécharger."""
     schema = get_owned_schema(db, schema_id, user)
-    type_map = {"VARCHAR": "VARCHAR(255)", "INT": "INTEGER", "FLOAT": "REAL", "DOUBLE": "DOUBLE PRECISION"}
-
-    statements = []
-    for t in schema.tables:
-        cols = ["    id UUID PRIMARY KEY"] + [f'    "{f.name}" {type_map.get(f.type, f.type)}' for f in t.fields]
-        statements.append(f'CREATE TABLE "{t.name}" (\n' + ",\n".join(cols) + "\n);")
-    for t in schema.tables:
-        for f in t.fields:
-            for r in f.relations_from:
-                target = r.field_to
-                statements.append(
-                    f'ALTER TABLE "{t.name}" ADD FOREIGN KEY ("{f.name}") '
-                    f'REFERENCES "{target.parent_table.name}" ("{target.name}");'
-                )
-
-    sql = "\n\n".join(statements) or "-- empty schema"
-    filename = (schema.name or "schema") + ".sql"
-    return StreamingResponse(
-        io.BytesIO(sql.encode("utf-8")),
-        media_type="text/sql",
+    result = generate_sql(schema, dialect)
+    filename = f"{schema.name}_{dialect}.sql".replace(" ", "_")
+    return Response(
+        content=result.sql,
+        media_type="application/sql",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
