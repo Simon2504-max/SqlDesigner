@@ -3,14 +3,15 @@ schemas.py — Format et validation des données échangées avec l'interface.
 
 Ces classes (Pydantic) décrivent ce que l'API accepte en entrée (…Create, …Update)
 et ce qu'elle renvoie en sortie (…Read, …Out). Si une requête ne respecte pas
-ces règles, FastAPI la refuse automatiquement avec une erreur 422 détaillée.
+ces règles, FastAPI la refuse automatiquement avec une erreur 422.
 
 À ne pas confondre avec models.py, qui décrit les tables de la base de données.
 """
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Optional
 
 from pydantic import (
     UUID4,
+    AfterValidator,
     BaseModel,
     ConfigDict,
     EmailStr,
@@ -21,18 +22,8 @@ from pydantic import (
 
 from models import SQL_RELATION_TYPES, SQL_TYPES
 
-# Ce que "from schemas import *" a le droit d'importer
-__all__ = [
-    "UUID4",
-    "UserCreate", "UserUpdate", "UserOut", "UserLogin",
-    "SchemaCreate", "SchemaRead",
-    "TablesCreate", "TablesRead",
-    "FieldCreate", "FieldRead",
-    "RelationCreate", "RelationRead",
-]
-
 # ---------------------------------------------------------------------------
-# Types réutilisables
+# Types et vérifications réutilisables
 # ---------------------------------------------------------------------------
 
 # Nom SQL valide : commence par une lettre ou _, puis lettres, chiffres ou _.
@@ -51,6 +42,27 @@ SqlIdentifier = Annotated[
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
 
+def check_sql_type(value: str) -> str:
+    """Le type doit faire partie de SQL_TYPES (models.py)."""
+    value = value.strip().upper()
+    if value not in SQL_TYPES:
+        raise ValueError(f"Type SQL inconnu : {value}")
+    return value
+
+
+def check_relation_type(value: str) -> str:
+    """Le type de relation doit être OO, OM ou MM."""
+    value = value.strip().upper()
+    if value not in SQL_RELATION_TYPES:
+        raise ValueError(f"Type de relation inconnu : {value} (OO, OM ou MM)")
+    return value
+
+
+# Types "texte + vérification" : la fonction s'exécute après la validation du texte
+SqlType = Annotated[str, AfterValidator(check_sql_type)]
+RelationType = Annotated[str, AfterValidator(check_relation_type)]
+
+
 class ORMModel(BaseModel):
     """Modèle de sortie qui peut être construit directement depuis un objet SQLAlchemy."""
 
@@ -62,11 +74,9 @@ class ORMModel(BaseModel):
 # ---------------------------------------------------------------------------
 
 class UserCreate(BaseModel):
-    # Les règles sur la longueur du nom et du mot de passe seront ajoutées
-    # à l'étape 9, en même temps que l'affichage des erreurs dans l'interface.
-    username: str
+    username: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=50)]
     email: EmailStr
-    password: str
+    password: Annotated[str, StringConstraints(min_length=8, max_length=72)]
     full_name: Optional[str] = None
     phone: Optional[str] = None
 
@@ -90,12 +100,18 @@ class UserLogin(BaseModel):
     password: str
 
 
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
 # ---------------------------------------------------------------------------
 # Schémas (projets)
 # ---------------------------------------------------------------------------
 
 class SchemaCreate(BaseModel):
-    owner: int
+    # Le propriétaire n'est plus envoyé par l'interface : c'est l'utilisateur connecté.
     name: NonEmptyStr
 
 
@@ -118,6 +134,10 @@ class TablesCreate(BaseModel):
     name: SqlIdentifier
 
 
+class TableUpdate(BaseModel):
+    name: SqlIdentifier
+
+
 class TablesRead(ORMModel):
     id: UUID4
     schema_id: UUID4 = Field(alias="schema")
@@ -131,7 +151,7 @@ class TablesRead(ORMModel):
 class FieldCreate(BaseModel):
     table: UUID4
     name: SqlIdentifier
-    type: Literal[*SQL_TYPES]
+    type: SqlType
     length: Optional[int] = Field(default=None, ge=1, le=65535)
     is_primary_key: bool = False
     is_nullable: bool = True
@@ -145,6 +165,19 @@ class FieldCreate(BaseModel):
         if self.is_primary_key:
             self.is_nullable = False
         return self
+
+
+class FieldUpdate(BaseModel):
+    """Modification d'un champ : on n'envoie que ce qui change."""
+
+    name: Optional[SqlIdentifier] = None
+    type: Optional[SqlType] = None
+    length: Optional[int] = Field(default=None, ge=1, le=65535)
+    is_primary_key: Optional[bool] = None
+    is_nullable: Optional[bool] = None
+    is_unique: Optional[bool] = None
+    default_value: Optional[str] = None
+    position: Optional[int] = Field(default=None, ge=0)
 
 
 class FieldRead(ORMModel):
@@ -165,15 +198,19 @@ class FieldRead(ORMModel):
 # ---------------------------------------------------------------------------
 
 class RelationCreate(BaseModel):
-    value_from: UUID4  # champ référencé, côté "un"       (ex. auteur.id)
+    value_from: UUID4  # champ référencé, côté "un"           (ex. auteur.id)
     value_to: UUID4    # champ qui référence, côté "plusieurs" (ex. livre.auteur_id)
-    type: Literal[*SQL_RELATION_TYPES]
+    type: RelationType
 
     @model_validator(mode="after")
     def deux_champs_differents(self):
         if self.value_from == self.value_to:
             raise ValueError("Une relation doit relier deux champs différents.")
         return self
+
+
+class RelationUpdate(BaseModel):
+    type: RelationType
 
 
 class RelationRead(ORMModel):

@@ -3,50 +3,41 @@ import './App.css';
 import Auth from './pages/Auth';
 import Home from './pages/Home';
 import ProfileDetail from './pages/ProfileDetail';
+import { clearSession, getSavedUser, getToken, setUnauthorizedHandler } from './session';
 
 function App() {
-  const [userId, setUserId] = useState(null);
-  const [view, setView] = useState('auth'); // auth | home | profile
+  // Au démarrage : si un jeton est enregistré, on est déjà connecté
+  const savedUser = getToken() ? getSavedUser() : null;
+  const [userId, setUserId] = useState(savedUser?.id ?? null);
+  const [view, setView] = useState(savedUser ? 'home' : 'auth'); // auth | home | profile
 
+  const handleLogout = () => {
+    clearSession();
+    setUserId(null);
+    setView('auth');
+  };
+
+  // Si le serveur répond 401 (jeton expiré…), retour à l'écran de connexion
   useEffect(() => {
-    // restore from localStorage
-    const saved = localStorage.getItem('sd_user');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.id) {
-          setUserId(parsed.id);
-          setView('home');
-        }
-      } catch (e) {
-        // ignore
-      }
-    }
+    setUnauthorizedHandler(() => {
+      setUserId(null);
+      setView('auth');
+    });
   }, []);
 
   const handleAuth = (id) => {
     setUserId(id);
-    localStorage.setItem('sd_user', JSON.stringify({ id }));
     setView('home');
   };
-
-  const handleLogout = () => {
-    setUserId(null);
-    localStorage.removeItem('sd_user');
-    setView('auth');
-  };
-
-  const handleOpenProfile = () => setView('profile');
-  const handleBackToHome = () => setView('home');
 
   return (
     <div className="App-root">
       {view === 'auth' && <Auth onAuth={handleAuth} />}
       {view === 'home' && (
-        <Home userId={userId} onOpenProfile={handleOpenProfile} onLogout={handleLogout} />
+        <Home userId={userId} onOpenProfile={() => setView('profile')} onLogout={handleLogout} />
       )}
       {view === 'profile' && (
-        <ProfileDetail userId={userId} onBack={handleBackToHome} onAccountDeleted={handleLogout} />
+        <ProfileDetail onBack={() => setView('home')} onAccountDeleted={handleLogout} />
       )}
     </div>
   );

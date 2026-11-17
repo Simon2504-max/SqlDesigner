@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import { API_BASE, errorMessage, saveSession } from '../session';
 
 export default function Auth({ onAuth }) {
   const [mode, setMode] = useState('login');
@@ -9,35 +10,29 @@ export default function Auth({ onAuth }) {
   const [success, setSuccess] = useState('');
 
   const handleLogin = async (e) => {
-    const apiUrl = process.env.REACT_APP_API_URL;
-    console.log("API URL ENV:", process.env.REACT_APP_API_URL);
-    console.log("API URL:", apiUrl);
     e.preventDefault();
     setError('');
     try {
-      const res = await axios.post(`${apiUrl}/login`, login);
-      if (res.data && res.data.user) {
-        const user = res.data.user;
-        localStorage.setItem('sd_user', JSON.stringify({ id: user.id }));
-        onAuth(user.id);
-      }
+      const res = await axios.post(`${API_BASE}/login`, login);
+      // Le serveur renvoie le jeton et l'utilisateur : on les garde dans le navigateur
+      saveSession(res.data.access_token, res.data.user);
+      onAuth(res.data.user.id);
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Login failed');
+      setError(errorMessage(err, 'Connexion impossible.'));
     }
   };
 
   const handleRegister = async (e) => {
-    const apiUrl = process.env.REACT_APP_API_URL;
     e.preventDefault();
     setError('');
     setSuccess('');
     try {
-      await axios.post(`${apiUrl}/register`, register);
-      setSuccess('Registered successfully — you can now log in');
+      await axios.post(`${API_BASE}/register`, register);
+      setSuccess('Compte créé : vous pouvez maintenant vous connecter.');
       setRegister({ username: '', email: '', password: '' });
       setMode('login');
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Registration failed');
+      setError(errorMessage(err, 'Inscription impossible.'));
     }
   };
 

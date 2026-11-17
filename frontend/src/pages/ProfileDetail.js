@@ -1,45 +1,54 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { API_BASE, errorMessage } from '../session';
 
-export default function ProfileDetail({ userId, onBack, onAccountDeleted, onUpdated }) {
+export default function ProfileDetail({ onBack, onAccountDeleted }) {
   const [form, setForm] = useState({ full_name: '', email: '', phone: '' });
+  const [username, setUsername] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
+  // Au chargement : on récupère le profil de l'utilisateur connecté
   useEffect(() => {
-    // Fetch user info: currently backend returns user in login only, so try GET via backend if available.
-    // We'll rely on data passed from parent in this minimal implementation.
-  }, [userId]);
+    axios
+      .get(`${API_BASE}/me`)
+      .then((res) => {
+        setUsername(res.data.username);
+        setForm({
+          full_name: res.data.full_name || '',
+          email: res.data.email || '',
+          phone: res.data.phone || '',
+        });
+      })
+      .catch((e) => setErr(errorMessage(e, 'Impossible de charger le profil.')));
+  }, []);
 
   const handleUpdate = async (e) => {
-    const apiUrl = process.env.REACT_APP_API_URL;
     e.preventDefault();
-    setMsg(''); setErr('');
+    setMsg('');
+    setErr('');
     try {
-      const res = await axios.put(`${apiUrl}/update-user/${userId}`, form);
-      setMsg('Profile updated');
-      if (onUpdated) onUpdated(res.data);
-    } catch (err) {
-      setErr(err?.response?.data?.detail || 'Update failed');
+      await axios.put(`${API_BASE}/me`, form);
+      setMsg('Profil mis à jour.');
+    } catch (e) {
+      setErr(errorMessage(e, 'Mise à jour impossible.'));
     }
   };
 
   const handleDelete = async () => {
-    const apiUrl = process.env.REACT_APP_API_URL;
-    if (!window.confirm('Delete account? This cannot be undone.')) return;
+    if (!window.confirm('Supprimer le compte ? Tous vos schémas seront perdus.')) return;
     try {
-      await axios.delete(`${apiUrl}/delete-user/${userId}`);
-      localStorage.removeItem('sd_user');
-      if (onAccountDeleted) onAccountDeleted();
-    } catch (err) {
-      setErr(err?.response?.data?.detail || 'Delete failed');
+      await axios.delete(`${API_BASE}/me`);
+      onAccountDeleted();
+    } catch (e) {
+      setErr(errorMessage(e, 'Suppression impossible.'));
     }
   };
 
   return (
     <div className="profile-card">
       <button className="back" onClick={onBack}>← Back</button>
-      <h3>Profile</h3>
+      <h3>Profile {username && `· ${username}`}</h3>
       {err && <div className="auth-error">{err}</div>}
       {msg && <div className="auth-success">{msg}</div>}
 

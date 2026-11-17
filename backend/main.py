@@ -1,577 +1,81 @@
-from sqlalchemy.exc import IntegrityError
-import psycopg2
-from fastapi import FastAPI, Depends, HTTPException, Body
-from sqlalchemy.orm import Session
-from sqlalchemy import update
-from fastapi import Header
+"""
+main.py — Point d'entrée du serveur.
+
+Il ne contient plus les routes elles-mêmes : il crée l'application FastAPI,
+la configure (CORS, gestion des erreurs) et branche les "routeurs" du dossier
+routers/ (un fichier par sujet : comptes, schémas, tables, champs, relations).
+"""
+import os
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 import models
-import schemas
-from schemas import *
-import database
-from security import create_access_token, get_current_user, hash_password, is_legacy_md5, verify_password
-import io
+from database import engine
+from routers import auth, fields, projects, relations, tables
 
-from fastapi import FastAPI, HTTPException, Depends, Path
-from sqlalchemy.orm import Session, joinedload
-from models import User, Schema, Table, Field, Relation
+# Crée les tables de la base si elles n'existent pas encore
+# (remplacé plus tard par des migrations Alembic, étape 12)
+models.Base.metadata.create_all(bind=engine)
 
+app = FastAPI(
+    title="SqlDesigner API",
+    description="Conception visuelle de schémas de bases de données relationnelles.",
+    version="2.0.0",
+)
 
-models.Base.metadata.create_all(bind=database.engine)
-
-app = FastAPI()
-
+# ---------------------------------------------------------------------------
+# CORS : quelles pages web ont le droit d'appeler ce serveur
+# ---------------------------------------------------------------------------
+allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for testing
+    allow_origins=[origin.strip() for origin in allowed_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# Inscription
-@app.post("/register", response_model=schemas.UserOut)
-def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    existing = db.query(models.User).filter(
-        (models.User.username == user.username) | (models.User.email == user.email)
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Ce nom d'utilisateur ou cet email est déjà utilisé.")
-
-    new_user = models.User(
-        username=user.username,
-        email=user.email,
-        password_hash=hash_password(user.password),
-        full_name=user.full_name,
-        phone=user.phone,
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
-
-# Connexion
-@app.post("/login")
-def login(user: schemas.UserLogin, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if not db_user or not verify_password(user.password, db_user.password_hash):
-        raise HTTPException(status_code=401, detail="Nom d'utilisateur ou mot de passe incorrect.")
-
-    # Ancien compte haché en MD5 : on en profite pour passer à bcrypt
-    if is_legacy_md5(db_user.password_hash):
-        db_user.password_hash = hash_password(user.password)
-        db.commit()
-
-    return {
-        "access_token": create_access_token(db_user.id),
-        "token_type": "bearer",
-        "user": schemas.UserOut.model_validate(db_user),
-    }
-
-
-# Qui suis-je ? (permet de tester le jeton)
-@app.get("/me", response_model=schemas.UserOut)
-def read_me(current_user: models.User = Depends(get_current_user)):
-    return current_user
-
-
-@app.put("/update-user/{user_id}", response_model=schemas.UserOut)
-def update_user(
-    user_id: int = Path(..., description="ID of the user to update"),
-    user_update: schemas.UserUpdate = Body(...),
-    db: Session = Depends(get_db)
-):
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    update_data = {}
-    if user_update.full_name and user_update.full_name.strip():
-        update_data["full_name"] = user_update.full_name.strip()
-    if user_update.email and user_update.email.strip():
-        update_data["email"] = user_update.email.strip()
-    if user_update.phone and user_update.phone.strip():
-        update_data["phone"] = user_update.phone.strip()
-
-    stmt = (
-        update(User)
-        .where(User.id == user_id)
-        .values(**update_data)
-        .execution_options(synchronize_session="fetch")
-    )
-
-    try:
-        db.execute(stmt)
-    except IntegrityError as e:
-        db.rollback()
-        if isinstance(e.orig, psycopg2.errors.UniqueViolation):
-            constraint = e.orig.diag.constraint_name
-            if constraint == "users_email_key":
-                raise HTTPException(status_code=400, detail="Email already exists.")
-            elif constraint == "users_username_key":
-                raise HTTPException(status_code=400, detail="Username already exists.")
-            else:
-                raise HTTPException(status_code=400, detail="Duplicate value found.")
-        else:
-            raise HTTPException(status_code=400, detail="Database integrity error.")
-
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-
-@app.delete("/delete-user/{user_id}", status_code=204)
-def delete_user(user_id: int = Path(..., description="ID of the user to delete"), db: Session = Depends(get_db)):
-    db_user = db.query(User).filter(User.id == user_id).first()
-    if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
-    db.delete(db_user)
-    db.commit()
-    return
-
-
-################ SCHEMAS #######################
-
-
-@app.post("/schemas/", response_model=schemas.SchemaRead)
-def create_schema(schema: schemas.SchemaCreate, db: Session = Depends(get_db)):
-    db_schema = Schema(**schema.model_dump(by_alias=True))
-    db.add(db_schema)
-    db.commit()
-    db.refresh(db_schema)
-    return db_schema
-
-
-@app.get("/schemas/all/{schema_id}")
-def read_schema(schema_id: schemas.UUID4, db: Session = Depends(get_db)):
-
-    schema = (
-    db.query(Schema)
-    .options(
-        joinedload(Schema.tables).joinedload(Table.fields).joinedload(Field.relations_to)
-    )
-    .filter(Schema.id == schema_id)
-    .first())
-
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found")
-    return schema
-
-
-
-@app.get("/schemas/", response_model=list[schemas.SchemaRead])
-def read_schemas(db: Session = Depends(get_db)):
-    return db.query(Schema).all()
-
-
-@app.get("/schemas/owner/{owner_id}", response_model=list[schemas.SchemaRead])
-def read_schemas_by_owner(owner_id: int, db: Session = Depends(get_db)):
-    schemas = db.query(Schema).filter(Schema.owner == owner_id).all()
-    if not schemas:
-        raise HTTPException(status_code=404, detail="No schemas found for this owner")
-    return schemas
-
-
-@app.get("/schemas/{schema_id}", response_model=schemas.SchemaRead)
-def read_schema(schema_id: schemas.UUID4, db: Session = Depends(get_db)):
-    schema = db.query(Schema).filter(Schema.id == schema_id).first()
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found")
-    return schema
-
-
-@app.get("/schemas/{schema_id}/dsd", response_class=PlainTextResponse)
-def get_dsd_diagram(schema_id: schemas.UUID4, db: Session = Depends(get_db)):
-    """
-    Génère un diagramme DSD (Data Structure Diagram) en format Mermaid
-    montrant les flux de données et relations entre tables
-    """
-    schema = db.query(Schema).filter(Schema.id == schema_id).first()
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found")
-    
-    # Charger les tables du schéma
-    tables = db.query(Table).filter(Table.schema == schema_id).all()
-    if not tables:
-        return "sequenceDiagram\n    Note over Schema: No tables in this schema"
-    
-    table_map = {t.id: t for t in tables}
-    
-    # Charger les champs
-    field_rows = db.query(Field).filter(Field.table.in_([t.id for t in tables])).all()
-    fields_by_table = {}
-    field_map = {f.id: f for f in field_rows}
-    for f in field_rows:
-        fields_by_table.setdefault(f.table, []).append(f)
-    
-    # Charger les relations
-    relations = db.query(Relation).all()
-    relations = [r for r in relations 
-                if r.value_from in field_map and r.value_to in field_map]
-    
-    def clean_name(n: str) -> str:
-        """Nettoie les noms pour Mermaid"""
-        if not n:
-            return 'Unknown'
-        s = str(n).replace(' ', '_').replace('-', '_').replace('"', '').replace("'", '')
-        if s and s[0].isdigit():
-            s = 'T_' + s
-        return s
-    
-    # Générer le diagramme de séquence DSD
-    lines = ["sequenceDiagram"]
-    
-    # Ajouter un titre
-    lines.append(f"    title Data Structure: {clean_name(schema.name)}")
-    lines.append("")
-    
-    # Déclarer les participants (tables)
-    for t in tables:
-        tn = clean_name(t.name)
-        field_count = len(fields_by_table.get(t.id, []))
-        lines.append(f"    participant {tn} as {t.name}<br/>({field_count} fields)")
-    
-    lines.append("")
-    
-    # Si pas de relations, afficher une note
-    if not relations:
-        lines.append("    Note over " + ",".join([clean_name(t.name) for t in tables[:2]]) + ": No relations defined")
+# ---------------------------------------------------------------------------
+# Erreurs : toujours une réponse JSON lisible {"detail": "..."}
+# ---------------------------------------------------------------------------
+@app.exception_handler(IntegrityError)
+def integrity_error_handler(request: Request, exc: IntegrityError):
+    """La base a refusé l'opération (doublon, lien impossible…) : erreur 409 au lieu de 500."""
+    message = str(exc.orig).lower()
+    if "unique" in message or "duplicate" in message:
+        detail = "Ce nom existe déjà à cet endroit (doublon)."
     else:
-        # Grouper les relations par type
-        for rel in relations:
-            from_field = field_map.get(rel.value_from)
-            to_field = field_map.get(rel.value_to)
-            
-            if not from_field or not to_field:
-                continue
-            
-            from_table = table_map.get(from_field.table)
-            to_table = table_map.get(to_field.table)
-            
-            if not from_table or not to_table:
-                continue
-            
-            from_name = clean_name(from_table.name)
-            to_name = clean_name(to_table.name)
-            
-            # Déterminer le type de flèche selon le type de relation
-            arrow = "->>"  # par défaut
-            if rel.type == "OO":
-                arrow = "->>"
-                label = f"{from_field.name} (1:1) {to_field.name}"
-            elif rel.type == "OM":
-                arrow = "->>"
-                label = f"{from_field.name} (1:N) {to_field.name}"
-            elif rel.type == "MM":
-                arrow = "->>"
-                label = f"{from_field.name} (N:N) {to_field.name}"
-            else:
-                label = f"{from_field.name} → {to_field.name}"
-            
-            lines.append(f"    {from_name}{arrow}{to_name}: {label}")
-    
-    # Ajouter des notes sur les champs de chaque table
-    lines.append("")
-    for t in tables:
-        tn = clean_name(t.name)
-        fields = fields_by_table.get(t.id, [])
-        if fields:
-            field_list = "<br/>".join([f"• {f.name} ({f.type})" for f in fields[:5]])
-            if len(fields) > 5:
-                field_list += f"<br/>• ... and {len(fields) - 5} more"
-            lines.append(f"    Note right of {tn}: Fields:<br/>{field_list}")
-    
-    return "\n".join(lines)
-
-@app.get("/schemas/{schema_id}/export")
-def export_schema(schema_id: schemas.UUID4, db: Session = Depends(get_db)):
-    schema = db.query(Schema).filter(Schema.id == schema_id).first()
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found")
-
-    # gather tables, fields, relations
-    tables = db.query(Table).filter(Table.schema == schema_id).all()
-    table_map = {t.id: t for t in tables}
-    table_names = {t.id: t.name for t in tables}
-
-    # fields for these tables
-    table_ids = [t.id for t in tables]
-    fields = []
-    if table_ids:
-        fields = db.query(Field).filter(Field.table.in_(table_ids)).all()
-
-    fields_by_table = {}
-    for f in fields:
-        fields_by_table.setdefault(f.table, []).append(f)
-
-    # relations limited to fields in this schema
-    relations = db.query(Relation).all()
-    relations = [r for r in relations if r.value_from in [f.id for f in fields] and r.value_to in [f.id for f in fields]]
-
-    # map SQL types to reasonable DDL types
-    TYPE_MAP = {
-        'VARCHAR': 'VARCHAR(255)',
-        'INT': 'INTEGER',
-        'INTEGER': 'INTEGER',
-        'TEXT': 'TEXT',
-        'DATE': 'DATE',
-        'TIME': 'TIME',
-        'TIMESTAMP': 'TIMESTAMP',
-        'DATETIME': 'TIMESTAMP',
-        'BOOLEAN': 'BOOLEAN',
-        'FLOAT': 'REAL',
-        'DOUBLE': 'DOUBLE PRECISION',
-        'UUID': 'UUID',
-        'JSON': 'JSON',
-        'JSONB': 'JSONB'
-    }
-
-    statements = []
-    for t in tables:
-        cols = []
-        cols.append('    id UUID PRIMARY KEY')
-        for f in fields_by_table.get(t.id, []):
-            sql_type = TYPE_MAP.get(f.type, f.type)
-            # ensure safe column name
-            col = f'    "{f.name}" {sql_type}'
-            cols.append(col)
-        stmt = f'CREATE TABLE "{t.name}" (\n' + ',\n'.join(cols) + '\n);'
-        statements.append(stmt)
-
-    # add foreign key constraints from relations
-    for r in relations:
-        from_field = db.query(Field).filter(Field.id == r.value_from).first()
-        to_field = db.query(Field).filter(Field.id == r.value_to).first()
-        if not from_field or not to_field:
-            continue
-        from_table = table_map.get(from_field.table)
-        to_table = table_map.get(to_field.table)
-        if not from_table or not to_table:
-            continue
-        fk_stmt = f'ALTER TABLE "{from_table.name}" ADD FOREIGN KEY ("{from_field.name}") REFERENCES "{to_table.name}" ("{to_field.name}");'
-        statements.append(fk_stmt)
-
-    full_sql = "\n\n".join(statements) or "-- empty schema"
-
-    buffer = io.BytesIO(full_sql.encode('utf-8'))
-    filename = (schema.name or 'schema') + '.sql'
-    return StreamingResponse(buffer, media_type='text/sql', headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+        detail = "Opération refusée par la base de données (contrainte non respectée)."
+    return JSONResponse(status_code=409, content={"detail": detail})
 
 
-@app.put("/schemas/{schema_id}", response_model=schemas.SchemaRead)
-def update_schema(schema_id: schemas.UUID4, schema_update: schemas.SchemaCreate, db: Session = Depends(get_db)):
-    schema = db.query(Schema).filter(Schema.id == schema_id).first()
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found")
-    for key, value in schema_update.model_dump(by_alias=True).items():
-        setattr(schema, key, value)
-    db.commit()
-    db.refresh(schema)
-    return schema
+@app.exception_handler(RequestValidationError)
+def validation_error_handler(request: Request, exc: RequestValidationError):
+    """Données invalides : on renvoie un message simple et lisible."""
+    messages = []
+    for error in exc.errors():
+        field = ".".join(str(part) for part in error["loc"] if part != "body")
+        text = error["msg"].removeprefix("Value error, ")
+        messages.append(f"{field} : {text}" if field else text)
+    return JSONResponse(status_code=422, content={"detail": " · ".join(messages)})
 
 
-@app.delete("/schemas/{schema_id}")
-def delete_schema(schema_id: schemas.UUID4, db: Session = Depends(get_db)):
-    schema = db.query(Schema).filter(Schema.id == schema_id).first()
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found")
-    db.delete(schema)
-    db.commit()
-    return {"detail": "Schema deleted"}
+# ---------------------------------------------------------------------------
+# Les routes
+# ---------------------------------------------------------------------------
+app.include_router(auth.router)
+app.include_router(projects.router)
+app.include_router(tables.router)
+app.include_router(fields.router)
+app.include_router(relations.router)
 
 
-################ TABLES #######################
-
-
-@app.post("/tables/", response_model=TablesRead)
-def create_table(table: TablesCreate, db: Session = Depends(get_db)):
-    db_table = Table(**table.model_dump(by_alias=True))
-    db.add(db_table)
-    db.commit()
-    db.refresh(db_table)
-    return db_table
-
-
-@app.get("/tables/", response_model=list[TablesRead])
-def read_tables(db: Session = Depends(get_db)):
-    return db.query(Table).all()
-
-
-@app.get("/tables/{table_id}", response_model=TablesRead)
-def read_table(table_id: UUID4, db: Session = Depends(get_db)):
-    table = db.query(Table).filter(Table.id == table_id).first()
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-    return table
-
-
-@app.get("/tables/schema/{schema_id}", response_model=list[TablesRead])
-def read_tables_by_schema(schema_id: UUID4, db: Session = Depends(get_db)):
-    tables = db.query(Table).filter(Table.schema == schema_id).all()
-    if not tables:
-        raise HTTPException(status_code=404, detail="No tables found for this schema")
-    return tables
-
-
-@app.put("/tables/{table_id}", response_model=TablesRead)
-def update_table(table_id: UUID4, table_update: TablesCreate, db: Session = Depends(get_db)):
-    table = db.query(Table).filter(Table.id == table_id).first()
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-    for key, value in table_update.model_dump(by_alias=True).items():
-        setattr(table, key, value)
-    db.commit()
-    db.refresh(table)
-    return table
-
-
-@app.delete("/tables/{table_id}")
-def delete_table(table_id: UUID4, db: Session = Depends(get_db)):
-    table = db.query(Table).filter(Table.id == table_id).first()
-    if not table:
-        raise HTTPException(status_code=404, detail="Table not found")
-    db.delete(table)
-    db.commit()
-    return {"detail": "Table deleted"}
-
-
-################ FIELDS #######################
-
-@app.post("/fields/", response_model=FieldRead)
-def create_field(field: FieldCreate, db: Session = Depends(get_db)):
-    db_field = Field(**field.model_dump(by_alias=True))
-    db.add(db_field)
-    db.commit()
-    db.refresh(db_field)
-    return db_field
-
-
-@app.get("/fields/", response_model=list[FieldRead])
-def read_fields(db: Session = Depends(get_db)):
-    return db.query(Field).all()
-
-
-@app.get("/fields/{field_id}", response_model=FieldRead)
-def read_field(field_id: UUID4, db: Session = Depends(get_db)):
-    field = db.query(Field).filter(Field.id == field_id).first()
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
-    return field
-
-
-@app.get("/fields/table/{table_id}", response_model=list[FieldRead])
-def read_fields_by_table(table_id: UUID4, db: Session = Depends(get_db)):
-    fields = db.query(Field).filter(Field.table == table_id).all()
-    if not fields:
-        raise HTTPException(status_code=404, detail="No fields found for this table")
-    return fields
-
-
-@app.get("/fields/schema/{schema_id}", response_model=list[FieldRead])
-def read_fields_by_schema(schema_id: UUID4, db: Session = Depends(get_db)):
-    table_ids = db.query(Table.id).filter(Table.schema == schema_id).all()
-    if not table_ids:
-        raise HTTPException(status_code=404, detail="Schema has no tables or does not exist")
-    
-    table_ids = [tid[0] for tid in table_ids]
-    fields = db.query(Field).filter(Field.table.in_(table_ids)).all()
-    if not fields:
-        raise HTTPException(status_code=404, detail="No fields found for this schema")
-    return fields
-
-
-@app.put("/fields/{field_id}", response_model=FieldRead)
-def update_field(field_id: UUID4, field_update: FieldCreate, db: Session = Depends(get_db)):
-    field = db.query(Field).filter(Field.id == field_id).first()
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
-    for key, value in field_update.model_dump(by_alias=True).items():
-        setattr(field, key, value)
-    db.commit()
-    db.refresh(field)
-    return field
-
-
-@app.delete("/fields/{field_id}")
-def delete_field(field_id: UUID4, db: Session = Depends(get_db)):
-    field = db.query(Field).filter(Field.id == field_id).first()
-    if not field:
-        raise HTTPException(status_code=404, detail="Field not found")
-    db.delete(field)
-    db.commit()
-    return {"detail": "Field deleted"}
-
-
-################ RELATIONS #######################
-
-
-@app.post("/relations/", response_model=RelationRead)
-def create_relation(relation: RelationCreate, db: Session = Depends(get_db)):
-    db_relation = Relation(**relation.model_dump(by_alias=True))
-    db.add(db_relation)
-    db.commit()
-    db.refresh(db_relation)
-    return db_relation
-
-
-@app.get("/relations/", response_model=list[RelationRead])
-def read_relations(db: Session = Depends(get_db)):
-    return db.query(Relation).all()
-
-
-@app.get("/relations/{relation_id}", response_model=RelationRead)
-def read_relation(relation_id: UUID4, db: Session = Depends(get_db)):
-    relation = db.query(Relation).filter(Relation.id == relation_id).first()
-    if not relation:
-        raise HTTPException(status_code=404, detail="Relation not found")
-    return relation
-
-
-@app.get("/relations/from/{field_id}", response_model=list[RelationRead])
-def read_relations_by_source(field_id: UUID4, db: Session = Depends(get_db)):
-    relations = db.query(Relation).filter(Relation.value_from == field_id).all()
-    if not relations:
-        raise HTTPException(status_code=404, detail="No relations found from this field")
-    return relations
-
-
-@app.get("/relations/to/{field_id}", response_model=list[RelationRead])
-def read_relations_by_target(field_id: UUID4, db: Session = Depends(get_db)):
-    relations = db.query(Relation).filter(Relation.value_to == field_id).all()
-    if not relations:
-        raise HTTPException(status_code=404, detail="No relations found to this field")
-    return relations
-
-
-@app.put("/relations/{relation_id}", response_model=RelationRead)
-def update_relation(relation_id: UUID4, relation_update: RelationCreate, db: Session = Depends(get_db)):
-    relation = db.query(Relation).filter(Relation.id == relation_id).first()
-    if not relation:
-        raise HTTPException(status_code=404, detail="Relation not found")
-    for key, value in relation_update.model_dump(by_alias=True).items():
-        setattr(relation, key, value)
-    db.commit()
-    db.refresh(relation)
-    return relation
-
-
-@app.delete("/relations/{relation_id}")
-def delete_relation(relation_id: UUID4, db: Session = Depends(get_db)):
-    relation = db.query(Relation).filter(Relation.id == relation_id).first()
-    if not relation:
-        raise HTTPException(status_code=404, detail="Relation not found")
-    db.delete(relation)
-    db.commit()
-    return {"detail": "Relation deleted"}
+@app.get("/", tags=["Divers"])
+def health():
+    """Permet de vérifier rapidement que le serveur tourne."""
+    return {"status": "ok"}
