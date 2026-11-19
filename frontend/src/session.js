@@ -11,7 +11,8 @@ import axios from "axios";
 const TOKEN_KEY = "sd_token";
 const USER_KEY = "sd_user";
 
-export const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
+// Adresse du serveur : variable VITE_API_URL du fichier .env (Vite ne lit que les variables VITE_…)
+export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
