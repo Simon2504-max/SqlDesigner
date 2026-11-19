@@ -20,7 +20,7 @@ export default function ProfileDetail({ onBack, onAccountDeleted }) {
           phone: res.data.phone || '',
         });
       })
-      .catch((e) => setErr(errorMessage(e, 'Impossible de charger le profil.')));
+      .catch((e) => setErr(errorMessage(e, 'Could not load your profile.')));
   }, []);
 
   const handleUpdate = async (e) => {
@@ -29,19 +29,19 @@ export default function ProfileDetail({ onBack, onAccountDeleted }) {
     setErr('');
     try {
       await axios.put(`${API_BASE}/me`, form);
-      setMsg('Profil mis à jour.');
+      setMsg('Profile updated.');
     } catch (e) {
-      setErr(errorMessage(e, 'Mise à jour impossible.'));
+      setErr(errorMessage(e, 'Update failed.'));
     }
   };
 
   const handleDelete = async () => {
-    if (!window.confirm('Supprimer le compte ? Tous vos schémas seront perdus.')) return;
+    if (!window.confirm('Delete your account? All your schemas will be lost.')) return;
     try {
       await axios.delete(`${API_BASE}/me`);
       onAccountDeleted();
     } catch (e) {
-      setErr(errorMessage(e, 'Suppression impossible.'));
+      setErr(errorMessage(e, 'Delete failed.'));
     }
   };
 

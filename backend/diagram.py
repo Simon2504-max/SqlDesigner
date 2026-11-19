@@ -63,14 +63,14 @@ def generate_er_diagram(schema) -> str:
     lines = ["---", f"title: {safe_text(schema.name)}", "---", "erDiagram"]
 
     if not tables:
-        lines += ["    SCHEMA_VIDE {", '        TEXT info "aucune table"', "    }"]
+        lines += ["    EMPTY_SCHEMA {", '        TEXT info "no table"', "    }"]
         return "\n".join(lines)
 
     # ---- Les entités (tables) et leurs attributs (champs) ----
     for t in tables:
         lines.append(f"    {safe_name(t.name)} {{")
         if not t.fields:
-            lines.append('        TEXT vide "aucun champ"')
+            lines.append('        TEXT empty "no field"')
         for f in t.fields:
             keys = []
             if f.is_primary_key:
@@ -84,9 +84,9 @@ def generate_er_diagram(schema) -> str:
             if not f.is_nullable or f.is_primary_key:
                 notes.append("NOT NULL")
             if f.length:
-                notes.append(f"longueur {f.length}")
+                notes.append(f"length {f.length}")
             if f.default_value:
-                notes.append(f"défaut {f.default_value}")
+                notes.append(f"default {f.default_value}")
 
             line = f"        {safe_name(f.type)} {safe_name(f.name)}"
             if keys:

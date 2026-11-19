@@ -39,7 +39,7 @@ def hash_password(password: str) -> str:
     """Calcule l'empreinte bcrypt d'un mot de passe."""
     data = password.encode("utf-8")
     if len(data) > MAX_PASSWORD_BYTES:
-        raise HTTPException(status_code=400, detail="Mot de passe trop long (72 caractères maximum).")
+        raise HTTPException(status_code=400, detail="Password too long (72 characters maximum).")
     return bcrypt.hashpw(data, bcrypt.gensalt()).decode("utf-8")
 
 
@@ -84,7 +84,7 @@ def get_current_user(
     """Retrouve l'utilisateur à partir du jeton envoyé par l'interface ; sinon erreur 401."""
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Non connecté ou session expirée.",
+        detail="Not logged in or session expired.",
         headers={"WWW-Authenticate": "Bearer"},
     )
     if credentials is None:

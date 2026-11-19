@@ -1,0 +1,106 @@
+/* =========================================================================
+   editor.css — Styles de l'éditeur de schémas (page principale).
+   Tous les noms commencent par "ed-" pour éviter les conflits avec App.css.
+   ========================================================================= */
+
+/* Un peu plus de place pour l'éditeur */
+.app-shell { max-width: 1400px; }
+.home-main { padding: 24px 32px; }
+
+.ed-root { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.ed-root h2 { margin: 0; }
+.ed-root select option, .ed-modal select option { background: #0b2240; color: #eaf6ff; }
+
+/* Lignes et utilitaires */
+.ed-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ed-grow { flex: 1; min-width: 120px; }
+.ed-full { width: 100%; box-sizing: border-box; }
+.ed-spacer { flex: 1; }
+.ed-muted { color: var(--muted); font-size: 13px; }
+.ed-actions { margin-top: 8px; }
+.ed-length { width: 90px; }
+.chip { white-space: nowrap; }
+.chip:disabled { opacity: 0.45; cursor: not-allowed; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 0.92em; color: #9ad1ff; }
+
+/* Listes (schémas, tables, champs) */
+.ed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ed-item { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.02); }
+.ed-item.selected { border-color: var(--accent-1); background: rgba(43,140,214,0.08); }
+.ed-item-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ed-table-item { cursor: pointer; }
+.ed-table-item:hover { border-color: rgba(43,140,214,0.5); }
+.ed-item-editing { border-color: var(--accent-2); }
+.ed-field-name { font-weight: 700; }
+.ed-field-type { color: #8fd3ff; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+
+/* Badges PK / NN / UQ */
+.ed-badges { display: inline-flex; gap: 4px; }
+.ed-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+  background: rgba(255,255,255,0.08); color: #cfe6ff; }
+.ed-badge-pk { background: #fbbf24; color: #0f172a; }
+.ed-badge-default { font-weight: 400; font-family: ui-monospace, Consolas, monospace; }
+
+/* Relations sous un champ */
+.ed-relations { list-style: none; margin: 6px 0 0 0; padding: 0 0 0 12px;
+  border-left: 2px solid rgba(43,140,214,0.35); display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.ed-relations li { display: flex; align-items: center; gap: 6px; }
+.ed-rel-arrow { color: var(--accent-2); font-weight: 700; }
+.ed-rel-type { font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: rgba(25,167,165,0.2); }
+.ed-icon-button { background: transparent; border: 0; color: #f08a8a; cursor: pointer; padding: 0 4px; font-size: 12px; }
+.ed-icon-button:hover { color: #ff5c5c; }
+
+/* Espace de travail d'un schéma */
+.ed-workspace { margin-top: 8px; padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(0,0,0,0.12); display: flex; flex-direction: column; gap: 14px; }
+.ed-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ed-toolbar h3 { margin: 0; }
+.ed-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(420px, 1.7fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .ed-grid { grid-template-columns: 1fr; } }
+.ed-panel { padding: 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.015); display: flex; flex-direction: column; gap: 10px; }
+.ed-panel h4 { margin: 0; }
+.ed-placeholder { color: var(--muted); align-items: center; justify-content: center; min-height: 120px; }
+
+/* Formulaire de champ */
+.ed-field-form { display: flex; flex-direction: column; gap: 8px; }
+.ed-options label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #cfe6ff; cursor: pointer; }
+.ed-add-box { padding: 10px; border-radius: 10px; border: 1px dashed rgba(255,255,255,0.12); }
+.ed-add-title { font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+
+/* Messages */
+.ed-notice { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px; font-size: 14px; }
+.ed-notice button { background: transparent; border: 0; color: inherit; cursor: pointer; margin-left: auto; }
+.ed-notice-success { background: rgba(25,167,165,0.15); color: #7ee7c7; border: 1px solid rgba(25,167,165,0.35); }
+.ed-notice-error { background: rgba(217,83,79,0.15); color: #ffb3b0; border: 1px solid rgba(217,83,79,0.4); }
+.ed-toast { position: fixed; top: 20px; right: 20px; z-index: 1000; max-width: 440px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5); background-color: #0f1d33; }
+
+/* Fenêtres (relation, export) */
+.ed-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex;
+  align-items: center; justify-content: center; z-index: 900; }
+.ed-modal { background: #0f1d33; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px;
+  width: min(560px, 92vw); max-height: 88vh; overflow: auto; display: flex; flex-direction: column; gap: 10px;
+  text-align: left; color: var(--text); }
+.ed-modal-wide { width: min(980px, 94vw); }
+.ed-modal h3 { margin: 0; }
+.ed-help { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.ed-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.ed-radio-list { display: flex; flex-direction: column; gap: 6px; }
+.ed-radio-list label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06); cursor: pointer; font-size: 13px; }
+.ed-radio-list label.active { border-color: var(--accent-1); background: rgba(43,140,214,0.1); }
+.ed-radio-list span { color: var(--muted); }
+.ed-tabs { display: flex; gap: 6px; }
+
+/* Export SQL */
+.ed-code { margin: 0; padding: 14px; border-radius: 8px; background: #020617; color: #d6e9ff; font-size: 12.5px;
+  line-height: 1.5; max-height: 52vh; overflow: auto; white-space: pre; font-family: ui-monospace, Consolas, monospace; }
+.ed-warnings { padding: 10px 14px; border-radius: 8px; background: rgba(251,191,36,0.1);
+  border: 1px solid rgba(251,191,36,0.35); color: #fde68a; font-size: 13px; }
+.ed-warnings ul { margin: 6px 0 0 0; padding-left: 18px; }
+
+/* Diagramme entité-relation */
+.ed-dsd-canvas { background: #fff; border-radius: 8px; padding: 16px; overflow: auto; text-align: center; min-height: 80px; }
+.ed-dsd-canvas svg { max-width: 100%; height: auto; }

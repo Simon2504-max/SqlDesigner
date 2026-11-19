@@ -29,7 +29,7 @@ def create_relation(
     field_from = get_owned_field(db, data.value_from, user)
     field_to = get_owned_field(db, data.value_to, user)
     if field_from.parent_table.schema != field_to.parent_table.schema:
-        raise HTTPException(status_code=400, detail="Les deux champs doivent appartenir au même schéma.")
+        raise HTTPException(status_code=400, detail="Both fields must belong to the same schema.")
 
     relation = models.Relation(**data.model_dump())
     db.add(relation)

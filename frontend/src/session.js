@@ -63,9 +63,9 @@ axios.interceptors.response.use(
 );
 
 /** Transforme une erreur axios en message lisible pour l'utilisateur. */
-export function errorMessage(error, fallback = "Une erreur est survenue.") {
+export function errorMessage(error, fallback = "Something went wrong.") {
   const detail = error?.response?.data?.detail;
   if (typeof detail === "string") return detail;
-  if (!error?.response) return "Serveur injoignable. Est-il lancé ?";
+  if (!error?.response) return "Cannot reach the server. Is it running?";
   return fallback;
 }

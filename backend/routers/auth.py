@@ -18,7 +18,7 @@ def register(data: schemas.UserCreate, db: Session = Depends(get_db)):
         (models.User.username == data.username) | (models.User.email == data.email)
     ).first()
     if existing:
-        raise HTTPException(status_code=409, detail="Ce nom d'utilisateur ou cet email est déjà utilisé.")
+        raise HTTPException(status_code=409, detail="This username or email is already taken.")
 
     user = models.User(
         username=data.username,
@@ -37,7 +37,7 @@ def register(data: schemas.UserCreate, db: Session = Depends(get_db)):
 def login(data: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == data.username).first()
     if user is None or not verify_password(data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Nom d'utilisateur ou mot de passe incorrect.")
+        raise HTTPException(status_code=401, detail="Incorrect username or password.")
 
     # Ancien compte haché en MD5 : on en profite pour passer à bcrypt
     if is_legacy_md5(user.password_hash):

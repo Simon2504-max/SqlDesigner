@@ -46,7 +46,7 @@ def check_sql_type(value: str) -> str:
     """Le type doit faire partie de SQL_TYPES (models.py)."""
     value = value.strip().upper()
     if value not in SQL_TYPES:
-        raise ValueError(f"Type SQL inconnu : {value}")
+        raise ValueError(f"Unknown SQL type: {value}")
     return value
 
 
@@ -54,7 +54,7 @@ def check_relation_type(value: str) -> str:
     """Le type de relation doit être OO, OM ou MM."""
     value = value.strip().upper()
     if value not in SQL_RELATION_TYPES:
-        raise ValueError(f"Type de relation inconnu : {value} (OO, OM ou MM)")
+        raise ValueError(f"Unknown relation type: {value} (OO, OM or MM)")
     return value
 
 
@@ -205,7 +205,7 @@ class RelationCreate(BaseModel):
     @model_validator(mode="after")
     def deux_champs_differents(self):
         if self.value_from == self.value_to:
-            raise ValueError("Une relation doit relier deux champs différents.")
+            raise ValueError("A relation must link two different fields.")
         return self
 
 

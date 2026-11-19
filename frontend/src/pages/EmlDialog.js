@@ -73,7 +73,7 @@ function TableNode({ data }) {
     <div className="eml-table" style={{ width: NODE_WIDTH }}>
       <div className="eml-table-header">{data.name}</div>
       <div className="eml-table-body">
-        {data.fields.length === 0 && <div className="eml-empty">aucun champ</div>}
+        {data.fields.length === 0 && <div className="eml-empty">no field</div>}
         {data.fields.map((field) => (
           <div key={field.id} className="eml-row">
             {/* Point d'arrivée d'une flèche (à gauche du champ) */}
@@ -86,7 +86,7 @@ function TableNode({ data }) {
             <span className="eml-field-type">
               {field.type}
               {field.length ? `(${field.length})` : ""}
-              {field.is_primary_key && <Badge title="Clé primaire">PK</Badge>}
+              {field.is_primary_key && <Badge title="Primary key">PK</Badge>}
               {!field.is_primary_key && !field.is_nullable && <Badge title="NOT NULL">NN</Badge>}
               {field.is_unique && <Badge title="UNIQUE">UQ</Badge>}
             </span>
@@ -177,7 +177,7 @@ export default function EmlDialog({ open, onClose, schemaId, schemaName, apiBase
       setVersion((v) => v + 1);
     } catch (err) {
       console.error(err);
-      setError("Impossible de charger le diagramme. Le serveur est-il lancé ?");
+      setError("Could not load the diagram. Is the server running?");
     } finally {
       setLoading(false);
     }
@@ -196,19 +196,19 @@ export default function EmlDialog({ open, onClose, schemaId, schemaName, apiBase
         <style>{EML_CSS}</style>
 
         <div className="eml-header">
-          <h2>{schemaName || "Diagramme"}</h2>
+          <h2>{schemaName || "Diagram"}</h2>
           <div className="eml-actions">
             <button onClick={load} disabled={loading}>
-              {loading ? "Chargement…" : "Actualiser"}
+              {loading ? "Loading…" : "Refresh"}
             </button>
-            <button onClick={onClose}>Fermer</button>
+            <button onClick={onClose}>Close</button>
           </div>
         </div>
 
         <div className="eml-canvas">
           {error && <div className="eml-message eml-error">{error}</div>}
           {!error && !loading && nodes.length === 0 && (
-            <div className="eml-message">Ce schéma ne contient encore aucune table.</div>
+            <div className="eml-message">This schema has no table yet.</div>
           )}
           <ReactFlow
             key={version}

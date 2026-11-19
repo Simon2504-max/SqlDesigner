@@ -48,9 +48,9 @@ def integrity_error_handler(request: Request, exc: IntegrityError):
     """La base a refusé l'opération (doublon, lien impossible…) : erreur 409 au lieu de 500."""
     message = str(exc.orig).lower()
     if "unique" in message or "duplicate" in message:
-        detail = "Ce nom existe déjà à cet endroit (doublon)."
+        detail = "This name already exists here (duplicate)."
     else:
-        detail = "Opération refusée par la base de données (contrainte non respectée)."
+        detail = "Operation refused by the database (constraint violated)."
     return JSONResponse(status_code=409, content={"detail": detail})
 
 

@@ -18,7 +18,7 @@ export default function Auth({ onAuth }) {
       saveSession(res.data.access_token, res.data.user);
       onAuth(res.data.user.id);
     } catch (err) {
-      setError(errorMessage(err, 'Connexion impossible.'));
+      setError(errorMessage(err, 'Login failed.'));
     }
   };
 
@@ -28,19 +28,19 @@ export default function Auth({ onAuth }) {
     setSuccess('');
     try {
       await axios.post(`${API_BASE}/register`, register);
-      setSuccess('Compte créé : vous pouvez maintenant vous connecter.');
+      setSuccess('Account created: you can now log in.');
       setRegister({ username: '', email: '', password: '' });
       setMode('login');
     } catch (err) {
-      setError(errorMessage(err, 'Inscription impossible.'));
+      setError(errorMessage(err, 'Sign-up failed.'));
     }
   };
 
   return (
     <div className="auth-card">
       <div className="auth-header">
-        <h1>SQL Dezigner</h1>
-        <p className="subtitle">Create, design and manage your SQL models — coming soon</p>
+        <h1>SqlDesigner</h1>
+        <p className="subtitle">Design your database visually and export it to SQL</p>
       </div>
 
       <div className="auth-tabs">
