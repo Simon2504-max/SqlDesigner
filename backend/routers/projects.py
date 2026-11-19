@@ -16,6 +16,7 @@ import schemas
 from access import get_owned_schema
 from database import get_db
 from security import get_current_user
+from diagram import generate_er_diagram
 from sql_export import generate_sql
 
 router = APIRouter(prefix="/schemas", tags=["Schémas"])
@@ -74,44 +75,13 @@ def delete_schema(schema_id: uuid.UUID, db: Session = Depends(get_db), user: mod
 
 
 # ---------------------------------------------------------------------------
-# Diagramme (DSD) : ANCIENNE version, simplement protégée (réécrite à l'étape 8).
+# Diagramme entité-relation (étape 8) : voir diagram.py
 # ---------------------------------------------------------------------------
-
-def _clean_name(name: str) -> str:
-    s = str(name or "Unknown").replace(" ", "_").replace("-", "_").replace('"', "").replace("'", "")
-    return "T_" + s if s[0].isdigit() else s
-
 
 @router.get("/{schema_id}/dsd", response_class=PlainTextResponse)
 def get_dsd_diagram(schema_id: uuid.UUID, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    schema = get_owned_schema(db, schema_id, user)
-    tables = schema.tables
-    if not tables:
-        return "sequenceDiagram\n    Note over Schema: No tables in this schema"
-
-    field_map = {f.id: f for t in tables for f in t.fields}
-    table_map = {t.id: t for t in tables}
-    relations = [r for f in field_map.values() for r in f.relations_from if r.value_to in field_map]
-
-    lines = ["sequenceDiagram", f"    title Data Structure: {_clean_name(schema.name)}", ""]
-    for t in tables:
-        lines.append(f"    participant {_clean_name(t.name)} as {t.name}<br/>({len(t.fields)} fields)")
-    lines.append("")
-    if not relations:
-        lines.append("    Note over " + ",".join(_clean_name(t.name) for t in tables[:2]) + ": No relations defined")
-    for rel in relations:
-        f_from, f_to = field_map[rel.value_from], field_map[rel.value_to]
-        label = {"OO": "(1:1)", "OM": "(1:N)", "MM": "(N:N)"}.get(rel.type, "→")
-        lines.append(
-            f"    {_clean_name(table_map[f_from.table].name)}->>{_clean_name(table_map[f_to.table].name)}: "
-            f"{f_from.name} {label} {f_to.name}"
-        )
-    lines.append("")
-    for t in tables:
-        if t.fields:
-            items = "<br/>".join(f"• {f.name} ({f.type})" for f in t.fields)
-            lines.append(f"    Note right of {_clean_name(t.name)}: Fields:<br/>{items}")
-    return "\n".join(lines)
+    """Le texte Mermaid (erDiagram) du schéma, que l'interface transforme en image."""
+    return generate_er_diagram(get_owned_schema(db, schema_id, user))
 
 
 # ---------------------------------------------------------------------------
